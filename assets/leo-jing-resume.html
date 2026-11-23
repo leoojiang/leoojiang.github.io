@@ -13,6 +13,9 @@
       --line: #8a8a8a;
       --paper: #ffffff;
       --canvas: #ececec;
+      --accent-ink: #a9583e;
+      --accent-hover: #87432f;
+      --on-accent: #faf9f5;
     }
     * { box-sizing: border-box; }
     html {
@@ -109,7 +112,27 @@
     .education-row p { margin: 0; }
     .degree { color: var(--muted); }
     @page { size: Letter; margin: 0; }
-    .resume-download { margin: 0.1in 0; }
+    .resume-contact {
+      display: grid;
+      justify-items: end;
+      gap: 10px;
+    }
+    .resume-download {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      padding: 0 16px;
+      border-radius: 8px;
+      background: var(--accent-ink);
+      color: var(--on-accent);
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .resume-download:hover { background: var(--accent-hover); }
+    .resume-download:focus-visible {
+      outline: 2px solid var(--ink);
+      outline-offset: 3px;
+    }
     @media print {
       .resume-download { display: none; }
       html, body { background: #ffffff; }
@@ -126,7 +149,7 @@
         box-shadow: none;
       }
       header, .role-line, .education-row { grid-template-columns: 1fr; }
-      address { text-align: left; }
+      .resume-contact { justify-self: end; }
     }
   </style>
 </head>
@@ -137,12 +160,14 @@
         <h1>Leo Jing</h1>
         <p class="headline">Senior Software Engineer | Distributed Systems, Data Platforms, and AI Agents</p>
       </div>
-      <address>
-        <a href="mailto:leojiang2077@gmail.com">leojiang2077@gmail.com</a><br>
-        Stanford, CA
-      </address>
+      <div class="resume-contact">
+        <a class="resume-download" href="leo-jing-resume.pdf" download>Download PDF</a>
+        <address>
+          <a href="mailto:leojiang2077@gmail.com">leojiang2077@gmail.com</a><br>
+          Stanford, CA
+        </address>
+      </div>
     </header>
-    <p class="resume-download"><a href="leo-jing-resume.pdf" download>Download résumé (PDF)</a></p>
 
     <section class="skills" aria-labelledby="skills-heading">
       <h2 id="skills-heading">Technical Skills</h2>
