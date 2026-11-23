@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Leo Jiang - Senior Software Engineer resume focused on distributed systems, data platforms, and production AI agents.">
+  <title>Leo Jiang Resume</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #111111;
+      --muted: #404040;
+      --line: #8a8a8a;
+      --paper: #ffffff;
+      --canvas: #ececec;
+    }
+    * { box-sizing: border-box; }
+    html {
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--ink);
+      background: var(--canvas);
+      font-size: 10pt;
+      line-height: 1.24;
+    }
+    body { margin: 0; padding: 24px 0; }
+    main {
+      width: 8.5in;
+      min-height: 11in;
+      margin: 0 auto;
+      padding: 0.42in 0.5in;
+      background: var(--paper);
+      box-shadow: 0 3px 18px rgba(0, 0, 0, 0.14);
+    }
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 0.15in;
+      align-items: end;
+      padding-bottom: 0.1in;
+      border-bottom: 1px solid var(--ink);
+    }
+    h1 {
+      margin: 0;
+      font-size: 23pt;
+      line-height: 1;
+      letter-spacing: -0.35pt;
+    }
+    .headline {
+      margin: 0.05in 0 0;
+      color: var(--muted);
+      font-size: 10.5pt;
+      font-weight: 700;
+    }
+    address {
+      font-style: normal;
+      text-align: right;
+      white-space: nowrap;
+    }
+    a {
+      color: var(--ink);
+      text-decoration-thickness: 0.5px;
+      text-underline-offset: 1.5px;
+    }
+    section { margin-top: 0.12in; }
+    h2 {
+      margin: 0 0 0.055in;
+      padding-bottom: 0.025in;
+      border-bottom: 0.6px solid var(--line);
+      font-size: 10.8pt;
+      line-height: 1.05;
+      letter-spacing: 0.8pt;
+      text-transform: uppercase;
+    }
+    .skills p { margin: 0.025in 0; }
+    .skills strong { font-weight: 700; }
+    article {
+      break-inside: avoid;
+      margin-top: 0.075in;
+    }
+    .role-line,
+    .education-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 0.12in;
+      align-items: baseline;
+    }
+    h3 {
+      margin: 0;
+      font-size: 10.4pt;
+      line-height: 1.12;
+    }
+    .dates {
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .role {
+      margin: 0.012in 0 0;
+      color: var(--muted);
+      font-style: italic;
+    }
+    ul {
+      margin: 0.035in 0 0;
+      padding-left: 0.18in;
+    }
+    li {
+      margin: 0.024in 0;
+      padding-left: 0.015in;
+    }
+    .education-row p { margin: 0; }
+    .degree { color: var(--muted); }
+    @page { size: Letter; margin: 0; }
+    .resume-download { margin: 0.1in 0; }
+    @media print {
+      .resume-download { display: none; }
+      html, body { background: #ffffff; }
+      body { padding: 0; }
+      main { margin: 0; box-shadow: none; }
+      a { text-decoration: none; }
+    }
+    @media screen and (max-width: 850px) {
+      body { padding: 0; }
+      main {
+        width: 100%;
+        min-height: 100vh;
+        padding: 24px 20px;
+        box-shadow: none;
+      }
+      header, .role-line, .education-row { grid-template-columns: 1fr; }
+      address { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <main aria-label="Leo Jiang resume">
+    <header>
+      <div>
+        <h1>Leo Jiang</h1>
+        <p class="headline">Senior Software Engineer | Distributed Systems, Data Platforms, and AI Agents</p>
+      </div>
+      <address>
+        <a href="mailto:leojiang2077@gmail.com">leojiang2077@gmail.com</a><br>
+        Stanford, CA
+      </address>
+    </header>
+    <p class="resume-download"><a href="leo-jiang-resume.pdf" download>Download résumé (PDF)</a></p>
+
+    <section class="skills" aria-labelledby="skills-heading">
+      <h2 id="skills-heading">Technical Skills</h2>
+      <p><strong>Programming languages:</strong> Java, Scala, Python, C#</p>
+      <p><strong>Data and distributed systems:</strong> Spark, Flink, Hadoop, SQL, ETL, stream/batch processing, exactly-once semantics</p>
+      <p><strong>AI and agent systems:</strong> LLM agents, RAG, MCP, tool orchestration, evaluation and benchmarking</p>
+    </section>
+
+    <section aria-labelledby="experience-heading">
+      <h2 id="experience-heading">Experience</h2>
+
+      <article>
+        <div class="role-line">
+          <h3>Microsoft</h3>
+          <span class="dates">Jul 2022 - Jul 2026</span>
+        </div>
+        <p class="role">Senior Software Engineer, Fabric Spark Team</p>
+        <ul>
+          <li>Led the architecture and 0-to-1 delivery of the Microsoft Fabric Spark coding and diagnostic agent across 50+ countries and regions, owning prompt orchestration, multi-turn tool execution, and the tool registry.</li>
+          <li>Built a 300-case benchmark and regression suite covering code generation, error correction, performance diagnosis, and tool use; redesigned context assembly across notebook cells, jobs, applications, and errors to improve diagnosis efficiency 5x and cut token use about 90%.</li>
+          <li>Grounded diagnoses in production evidence by building a Spark-domain RAG knowledge base and exposing job, stage, executor, driver, Livy log, and History Server data through MCP tools; open-sourced reusable Spark skills in Microsoft’s <a href="https://github.com/microsoft/skills-for-fabric">skills-for-fabric</a> project.</li>
+          <li>Designed and shipped Spark Advisor, which analyzes Spark events, logical plans, and logs within an application to surface real-time diagnostic and performance recommendations.</li>
+          <li>Built a background service that models repeated notebook and Spark application runs for a platform supporting 10M+ applications per day, detecting duration and I/O regressions, identifying outliers, and performing root-cause analysis; published the RCA work at VLDB 2025.</li>
+        </ul>
+      </article>
+
+      <article>
+        <div class="role-line">
+          <h3>JD.com</h3>
+          <span class="dates">Aug 2020 - Jul 2022</span>
+        </div>
+        <p class="role">Senior Software Engineer, Advertising Data Team</p>
+        <ul>
+          <li>Built a Flink-based advertising data platform processing about 1B events per day from JD.com and external channels, with pluggable sources and sinks and exactly-once processing for core pipelines.</li>
+          <li>Defined consistency and latency by workload: strong consistency for billing and reconciliation, eventual consistency for analytical paths, typical end-to-end latency under 30 seconds, and 2-3 seconds for time-sensitive budget-overspend controls.</li>
+          <li>Engineered disaster recovery and end-to-end load testing for major commerce peaks; delivered a 500K-QPS real-time aggregation system that counted participants and monetary amounts by campaign round for the 2022 CCTV Spring Festival Gala red-packet campaign.</li>
+        </ul>
+      </article>
+
+      <article>
+        <div class="role-line">
+          <h3>Xiaomi</h3>
+          <span class="dates">May 2018 - Jul 2020</span>
+        </div>
+        <p class="role">Software Engineer, Data Platform Team</p>
+        <ul>
+          <li>Developed Spark and Flink ETL pipelines that ingested client-side telemetry and funnel events, transformed them into warehouse tables, and powered downstream analytics and video recommendation workloads.</li>
+          <li>Built a SQL-based data workflow platform and an internal self-service BI system that routed query results through callbacks into dashboards, reducing report delivery from days to minutes.</li>
+        </ul>
+      </article>
+
+      <article>
+        <div class="role-line">
+          <h3>AskingData</h3>
+          <span class="dates">Dec 2016 - Apr 2018</span>
+        </div>
+        <p class="role">Software Engineer, Data Team</p>
+        <ul>
+          <li>Built distributed crawlers that collected billions of SKU records from Amazon, Taobao, and JD.com, with resilience to IP throttling, CAPTCHA, obfuscation, and encrypted payloads.</li>
+          <li>Created Spark pipelines to clean, normalize, and deduplicate product and sales data, then developed sales forecasting models for downstream market analysis.</li>
+        </ul>
+      </article>
+    </section>
+
+    <section aria-labelledby="education-heading">
+      <h2 id="education-heading">Education</h2>
+      <div class="education-row">
+        <p><strong>Huazhong University of Science and Technology</strong><br><span class="degree">Bachelor’s degree</span></p>
+        <p class="dates">Sep 2012 - Jul 2016</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
