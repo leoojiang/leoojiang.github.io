@@ -1,4 +1,4 @@
-# Leo Jing — personal site
+# Leo Jiang — personal site
 
 Static HTML, no build step, deployed via GitHub Pages at <https://agenticspark.github.io/>.
 
@@ -21,7 +21,7 @@ Static HTML, no build step, deployed via GitHub Pages at <https://agenticspark.g
 /assets/css/site.css all styles
 /assets/js/site.js   active-nav highlighter (only JS on the site)
 /assets/img/og-card.png         branded social card (og:image)
-/assets/leo-jing-resume.pdf  downloadable résumé
+/assets/leo-jiang-resume.pdf  downloadable résumé
 /assets/gallery/     ComfyUI sample images used by the ComfyUI post
 ```
 

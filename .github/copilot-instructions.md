@@ -1,4 +1,4 @@
-# Leo Jing site — workspace instructions
+# Leo Jiang site — workspace instructions
 
 This repository is a static GitHub Pages site. Keep changes simple, local, and framework-free.
 
