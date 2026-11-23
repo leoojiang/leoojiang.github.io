@@ -1,4 +1,4 @@
-# Design System — Ethan
+# Design System — Leo Jing
 
 > Single source of truth for the visual and interaction design of this site.
 > When generating UI, read this file first. Token values here override any ad-hoc choices.
@@ -7,7 +7,7 @@
 
 ## 1. Brand & Voice
 
-**Name:** Ethan
+**Name:** Leo Jing
 **Tagline:** Senior Software Engineer — AI systems and large-scale data platforms.
 **Audience:** Recruiters, hiring managers, and engineers exploring my work.
 
@@ -167,7 +167,7 @@ Shadows are subtle — they exist to lift cards off the background, not announce
 
 ### 8.1 Header
 - Sticky top, `--bg` with 88% opacity + `backdrop-filter: blur(10px)` and `--border` bottom.
-- Left: wordmark `Ethan` in serif.
+- Left: wordmark `Leo Jing` in serif.
 - Right: nav links — `Blog`, `About`. Sans, `--fs-2`, weight 500.
 - Header links meet the 44px target size. Active/hover states use text color plus a restrained underline,
   so color is not the only state carrier.
@@ -313,7 +313,7 @@ Shadows are subtle — they exist to lift cards off the background, not announce
 /assets/css/site.css
 /assets/js/site.js
 /assets/img/og-card.png          Branded 1200×630 social card (og:image on home + about)
-/assets/ethan-jiang-resume.pdf   Downloadable résumé (linked from about.html)
+/assets/leo-jing-resume.pdf   Downloadable résumé (linked from about.html)
 ```
 
 The Careers index links to the Top 200 company explorer, Blind 75, and the learning roadmap. The company explorer keeps company selection in-page: both the logo and name open an accessible resources drawer, where verified external interview links are listed and unavailable destinations are visibly disabled. Blind 75 uses expandable topic groups and keeps the full problem list on-site.

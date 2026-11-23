@@ -1,4 +1,4 @@
-# Ethan site — workspace instructions
+# Leo Jing site — workspace instructions
 
 This repository is a static GitHub Pages site. Keep changes simple, local, and framework-free.
 
