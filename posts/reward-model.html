@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Training a Reward Model from Scratch — Leo Jiang</title>
+  <meta name="description" content="An LLM101 practice lab on building a preference dataset, fine-tuning a scalar reward model, and comparing SFT and DPO.">
+  <link rel="canonical" href="https://leoojiang.github.io/posts/reward-model.html">
+  <link rel="icon" type="image/svg+xml" href="../assets/img/favicon.svg">
+  <link rel="stylesheet" href="../assets/css/site.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="inner">
+      <nav class="nav" aria-label="Primary">
+        <a href="../blog.html">Blog</a>
+        <a href="../careers/index.html">Careers</a>
+        <a href="../password.html">Tools</a>
+        <a href="../about.html">About</a>
+      </nav>
+    </div>
+  </header>
+  <main id="main" class="reading wide">
+    <p class="back-link"><a href="../blog.html">← Blog</a></p>
+    <article class="post explainer">
+      <header class="post-head">
+        <span class="eyebrow">LLM post-training · Practice</span>
+        <h1 class="post-title">Training a Reward Model from Scratch</h1>
+        <p class="post-dek">Build a dataset of paired answers, attach a scalar scoring head to an SFT checkpoint, and test whether the model can rank answers to unseen prompts.</p>
+        <p><time datetime="2026-09-01">September 1, 2026</time> · Leo Jiang</p>
+      </header>
+
+      <nav aria-label="On this page">
+        <ul>
+          <li><a href="#data">Build the dataset</a></li>
+          <li><a href="#model">Build the reward model</a></li>
+          <li><a href="#run">Run LLM101</a></li>
+          <li><a href="#evaluate">Evaluate and fine-tune</a></li>
+          <li><a href="#dpo">Connect RM, SFT, and DPO</a></li>
+        </ul>
+      </nav>
+
+      <section id="data">
+        <h2>Build the dataset</h2>
+        <p>Start with a task narrow enough to label consistently. For short factual answers, rank correctness first, then compliance with the requested format, then clarity. Pick prompts before generating answers. For each prompt, collect multiple candidates from the SFT model at different sampling settings or from distinct policies. Include plausible mistakes that differ from the correct response in a meaningful way.</p>
+        <p>Shuffle candidate order during labeling. Save the rubric version, prompt family, candidate source, and adjudication notes in your dataset manifest or annotation records. Keep ties and disagreements available for review and exclude unresolved pairs from strict binary training.</p>
+        <pre><code>{"messages":[{"role":"user","content":"Convert 2.5 hours to minutes."},{"role":"assistant","content":"150 minutes."}]}</code></pre>
+        <p>The line above is an SFT example. The preference export for RM or DPO contains a prompt and both responses.</p>
+        <pre><code>{"prompt":"Convert 2.5 hours to minutes.","chosen":"150 minutes.","rejected":"125 minutes."}</code></pre>
+        <p>Store one record per JSONL line. Deduplicate exact pairs and keep every variant of a prompt in one split. For a larger corpus, group paraphrases, shared source documents, and prompt templates before assigning splits. LLM101 hashes the normalized prompt into 90/5/5 buckets. Realized counts vary with the dataset. The script accepts the flat format above and two-turn conversational pairs. It skips identical tokenized responses, overlong pairs, and unsupported conversation layouts.</p>
+      </section>
+
+      <section id="model">
+        <h2>Build the reward model</h2>
+        <p>Initialize the backbone from <code>sft_hcf.pt</code> and add a fresh linear head that maps one hidden vector to one scalar. Feed the same chat-formatted prompt with each candidate response and take the final real token’s hidden state. In LLM101 that token is the assistant end marker. The causal backbone and right padding let the final real token attend to the preceding prompt and response while keeping padding out of the pooled representation.</p>
+        <p>With <code>margin = r(prompt, chosen) − r(prompt, rejected)</code>, the Bradley–Terry model assigns the chosen response probability <code>sigmoid(margin)</code>. Minimize the negative log of that probability. A positive margin ranks the chosen response first, and swapping the responses reverses the margin.</p>
+        <pre><code>margin = chosen_scores.float() - rejected_scores.float()
+loss = -torch.nn.functional.logsigmoid(margin).mean()</code></pre>
+        <p>The training loop updates the backbone and head with AdamW, clips the global gradient norm, and selects the checkpoint with the lowest validation loss. The checkpoint stores the model configuration, backbone and head weights, and validation metrics. Keep the matching tokenizer and chat template alongside it when you move the checkpoint.</p>
+      </section>
+
+      <section id="run">
+        <h2>Run LLM101</h2>
+        <p>Run these commands from the project root in a Python environment with PyTorch and <code>tokenizers</code>. The existing SFT and DPO scripts expect CUDA. The RM script also supports CPU, which is useful for a tiny smoke test. The example uses the project’s existing tokenizer and pretrained MiniModel checkpoint. To prepare your own corpus, place the SFT and preference exports in the paths below.</p>
+        <pre><code>python scripts/train_sft.py --data dataset/mini/hcf_sft.jsonl --ckpt pretrain.pt --out-name sft_hcf.pt
+
+python scripts/train_rm.py --data dataset/mini/dpo.jsonl --tokenizer out/mini/tokenizer.json --init out/mini/sft_hcf.pt --output out/mini/reward.pt --epochs 1 --batch-size 8 --lr 1e-5
+
+python scripts/train_dpo.py --data dataset/mini/dpo_train.jsonl --ckpt sft_hcf.pt --out-name dpo.pt</code></pre>
+        <p>For a shared RM and DPO evaluation, build <code>dpo_train.jsonl</code> from the same 90% train bucket. Normalize each prompt with <code>" ".join(prompt.casefold().split())</code>, take the first eight hex digits of its SHA-256 digest, convert them to an integer, and keep rows whose integer modulo 100 is below 90. Keep held-out prompts out of SFT as well. For separate experiments, the DPO script accepts any compatible training export.</p>
+      </section>
+
+      <section id="evaluate">
+        <h2>Evaluate and fine-tune</h2>
+        <ol>
+          <li>Smoke-test one run with examples in every split. Confirm the best checkpoint reloads and each score margin is finite. A zero-initialized score head starts at zero margin and about 0.693 pairwise loss.</li>
+          <li>Overfit a small training subset and check that the chosen scores move above the rejected scores. If they move in the opposite direction, inspect label orientation and response ordering before tuning hyperparameters.</li>
+          <li>Compare validation pairwise accuracy and loss against a length-only baseline. Slice by task, candidate source and response-length gap. Inspect short correct answers paired with long plausible mistakes.</li>
+          <li>Fine-tune for a few epochs from the same SFT checkpoint and compare validation loss across learning rates, keeping the split and seed fixed. For continual tuning from a saved RM, restore the full <code>reward_model</code> state into the scorer and use fresh validation data. The CLI’s <code>--init</code> takes a MiniModel checkpoint.</li>
+          <li>Once you select the configuration, evaluate on held-out prompts and report sample counts and uncertainty. For reranking, evaluate the actual candidate pool and compare the top-scoring answer with a human-reviewed baseline.</li>
+        </ol>
+        <p>In a seed-42 pilot, I sampled 512 rows from the local preference corpus. Filtering left 169 training pairs, 21 validation pairs, and 16 test pairs. After one epoch, the selected checkpoint got 12 of 21 validation pairs and 7 of 16 test pairs right. The run verified that training, checkpoint saving, and held-out evaluation work end to end. The sample is too small to establish ranking quality.</p>
+        <p>Raw rewards are relative scores. Use the score gap to compare two answers to the same prompt. Calibrate separately on held-out labels if a downstream consumer needs a reliable probability.</p>
+      </section>
+
+      <section id="dpo">
+        <h2>Connect RM, SFT, and DPO</h2>
+        <dl>
+          <dt><strong>SFT</strong></dt><dd>Fits a generative policy to demonstrations. LLM101 masks prompt tokens and computes next-token loss on the answer.</dd>
+          <dt><strong>Reward modeling</strong></dt><dd>Fits a standalone scorer to preferences. Its scalar output can rank candidate responses or provide a signal during RLHF.</dd>
+          <dt><strong>DPO</strong></dt><dd>Fits a generative policy directly to preference pairs. It compares chosen and rejected completion log-probability gaps against a frozen SFT reference. The DPO run has no dependency on <code>reward.pt</code>.</dd>
+        </dl>
+        <p>To compare the policies, generate answers from the SFT and DPO checkpoints on the same held-out prompts with matched sampling settings. Blind the source and measure human preference win rate, task correctness, and output length. A separately evaluated RM can help triage disagreements for review.</p>
+      </section>
+
+      <section aria-labelledby="references">
+        <h2 id="references">References</h2>
+        <ul>
+          <li><a href="https://arxiv.org/abs/2203.02155">InstructGPT paper</a></li>
+          <li><a href="https://arxiv.org/abs/2305.18290">Direct Preference Optimization paper</a></li>
+          <li><a href="https://huggingface.co/docs/trl/reward_trainer">Hugging Face TRL reward modeling</a></li>
+          <li><a href="https://huggingface.co/docs/trl/sft_trainer">Hugging Face TRL SFT</a></li>
+          <li><a href="https://huggingface.co/docs/trl/dpo_trainer">Hugging Face TRL DPO</a></li>
+        </ul>
+      </section>
+    </article>
+  </main>
+</body>
+</html>
