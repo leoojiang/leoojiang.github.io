@@ -8,6 +8,11 @@
   <link rel="canonical" href="https://leoojiang.github.io/posts/reward-model.html">
   <link rel="icon" type="image/svg+xml" href="../assets/img/favicon.svg">
   <link rel="stylesheet" href="../assets/css/site.css">
+  <style>
+    .post section { margin-block: 3rem; }
+    .post figure { margin-block: 1.5rem; }
+    .post pre, .table-wrap { overflow-x: auto; }
+  </style>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -27,42 +32,208 @@
       <header class="post-head">
         <span class="eyebrow">LLM post-training · Practice</span>
         <h1 class="post-title">Training a Reward Model from Scratch</h1>
-        <p class="post-dek">Build a dataset of paired answers, attach a scalar scoring head to an SFT checkpoint, and test whether the model can rank answers to unseen prompts.</p>
+        <p class="post-dek">Follow the LLM101 training stack from Chinese livestream transcripts and byte-level BPE to a small chat model, a standalone reward scorer, and a DPO-tuned policy.</p>
         <p><time datetime="2026-09-01">September 1, 2026</time> · Leo Jiang</p>
       </header>
 
       <nav aria-label="On this page">
         <ul>
-          <li><a href="#data">Build the dataset</a></li>
-          <li><a href="#model">Build the reward model</a></li>
+          <li><a href="#pipeline">Training pipeline</a></li>
+          <li><a href="#data">Data provenance</a></li>
+          <li><a href="#tokenizer">BPE and the binary corpus</a></li>
+          <li><a href="#objectives">Pretraining versus SFT</a></li>
+          <li><a href="#model">MiniModel architecture and RM</a></li>
           <li><a href="#run">Run LLM101</a></li>
           <li><a href="#evaluate">Evaluate and fine-tune</a></li>
           <li><a href="#dpo">Connect RM, SFT, and DPO</a></li>
         </ul>
       </nav>
 
+      <section id="pipeline">
+        <h2>One tokenizer, three data formats, two final models</h2>
+        <p>I started with a small decoder and used the HuChenFeng livestream archive to teach it a specific interaction pattern: a viewer speaks, then the host answers. The project also has a raw-text corpus and a separate preference-pair file. Each format carries a different training signal.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 520 332" role="img" aria-labelledby="map-title" xmlns="http://www.w3.org/2000/svg">
+            <title id="map-title">Raw text trains the tokenizer and base model. HuChenFeng dialogues train the SFT policy, which initializes a DPO policy and an independent RM.</title>
+            <defs><marker id="map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 Z" class="d-arrow"/></marker></defs>
+            <g class="d-edge" marker-end="url(#map-arrow)" fill="none">
+              <path d="M117 58 V87"/><path d="M117 139 V165 H180"/><path d="M388 139 V165 H340"/>
+              <path d="M260 203 V230 H119 V264"/><path d="M260 203 V230 H401 V264"/>
+            </g>
+            <rect x="20" y="10" width="194" height="48" rx="8" class="d-box"/>
+            <rect x="20" y="89" width="194" height="50" rx="8" class="d-box"/>
+            <rect x="282" y="89" width="216" height="50" rx="8" class="d-box"/>
+            <rect x="180" y="152" width="160" height="51" rx="8" class="d-box-accent"/>
+            <rect x="20" y="265" width="198" height="56" rx="8" class="d-box"/>
+            <rect x="302" y="265" width="198" height="56" rx="8" class="d-box"/>
+            <g text-anchor="middle">
+              <text x="117" y="30" class="d-title">Raw document text</text><text x="117" y="47" class="d-sub">byte-level BPE → token IDs</text>
+              <text x="117" y="109" class="d-title">Pretrain MiniModel</text><text x="117" y="127" class="d-sub">pretrain.bin → pretrain.pt</text>
+              <text x="390" y="109" class="d-title">HuChenFeng archive</text><text x="390" y="127" class="d-sub">viewer/host → hcf_sft.jsonl</text>
+              <text x="260" y="174" class="d-title">SFT policy</text><text x="260" y="191" class="d-sub">sft_hcf.pt</text>
+              <text x="119" y="286" class="d-title">Reward model</text><text x="119" y="306" class="d-sub">pairs → scalar scores</text>
+              <text x="401" y="286" class="d-title">DPO policy</text><text x="401" y="306" class="d-sub">pairs → token probabilities</text>
+            </g>
+          </svg>
+          <figcaption>Checkpoint lineage. RM and DPO can consume the same preference format and both start from SFT. Each trains its own copy of the model.</figcaption>
+        </figure>
+      </section>
+
       <section id="data">
-        <h2>Build the dataset</h2>
-        <p>Start with a task narrow enough to label consistently. For short factual answers, rank correctness first, then compliance with the requested format, then clarity. Pick prompts before generating answers. For each prompt, collect multiple candidates from the SFT model at different sampling settings or from distinct policies. Include plausible mistakes that differ from the correct response in a meaningful way.</p>
-        <p>Shuffle candidate order during labeling. Save the rubric version, prompt family, candidate source, and adjudication notes in your dataset manifest or annotation records. Keep ties and disagreements available for review and exclude unresolved pairs from strict binary training.</p>
-        <pre><code>{"messages":[{"role":"user","content":"Convert 2.5 hours to minutes."},{"role":"assistant","content":"150 minutes."}]}</code></pre>
-        <p>The line above is an SFT example. The preference export for RM or DPO contains a prompt and both responses.</p>
+        <h2>Where the data came from</h2>
+        <h3>Raw text for the tokenizer and base model</h3>
+        <p><code>pretrain.jsonl</code> supplies an unstructured <code>text</code> field per row. LLM101 has scripts to tokenize it and train on it. The checkout contains the processed corpus but does not record its upstream source. The HuChenFeng archive is the documented source for the dialogue conversion below.</p>
+
+        <h3>HuChenFeng viewer–host turns for SFT</h3>
+        <p>I used <a href="https://github.com/Olcmyk/HuChenFeng">Olcmyk/HuChenFeng</a>, a month-organized archive of livestream transcripts. <code>convert_hcf_sft.py</code> scans Markdown files, normalizes whitespace, retains lines starting with <code>某网友：</code> or <code>户晨风：</code>, and pairs adjacent viewer → host turns among the retained lines. The character filters are 6–150 for viewer text and 10–320 for host text. These are cheap noise filters. Check the 512-token budget after chat formatting as well.</p>
+      <figure class="diagram">
+        <svg viewBox="0 0 520 302" role="img" aria-labelledby="transcript-title" xmlns="http://www.w3.org/2000/svg">
+          <title id="transcript-title">Transcript conversion. Speaker and length filters are heuristics. Spot-check whether the host reply really answers the retained viewer turn.</title>
+          <defs><marker id="transcript-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 Z" class="d-arrow"/></marker></defs>
+          <rect x="34" y="10" width="452" height="50" rx="8" class="d-box"/>
+          <text x="260" y="30" text-anchor="middle" class="d-title">Transcript archive</text>
+          <text x="260" y="48" text-anchor="middle" class="d-sub">Monthly folders containing Markdown transcripts</text>
+          <line x1="260" y1="60" x2="260" y2="82" class="d-edge" marker-end="url(#transcript-arrow)"/>
+          <rect x="34" y="83" width="452" height="50" rx="8" class="d-box"/>
+          <text x="260" y="103" text-anchor="middle" class="d-title">Extract speaker turns</text>
+          <text x="260" y="121" text-anchor="middle" class="d-sub">Viewer → user · Host → assistant</text>
+          <line x1="260" y1="133" x2="260" y2="155" class="d-edge" marker-end="url(#transcript-arrow)"/>
+          <rect x="34" y="156" width="452" height="50" rx="8" class="d-box"/>
+          <text x="260" y="176" text-anchor="middle" class="d-title">Keep adjacent pairs</text>
+          <text x="260" y="194" text-anchor="middle" class="d-sub">Normalize whitespace and filter by character length</text>
+          <line x1="260" y1="206" x2="260" y2="228" class="d-edge" marker-end="url(#transcript-arrow)"/>
+          <rect x="34" y="229" width="452" height="50" rx="8" class="d-box-accent"/>
+          <text x="260" y="249" text-anchor="middle" class="d-title">Write hcf_sft.jsonl</text>
+          <text x="260" y="267" text-anchor="middle" class="d-sub">One two-message dialogue per JSONL row</text>
+        </svg>
+        <figcaption>Transcript conversion. Speaker and length filters are heuristics. Spot-check whether the host reply really answers the retained viewer turn.</figcaption>
+      </figure>
+        <pre><code>{"messages":[{"role":"user","content":"Convert 2.5 hours to minutes."},{"role":"assistant","content":"Multiply by 60: 150 minutes."}]}</code></pre>
+        <p>This invented example shows the schema. The host's real response supplies a demonstration of conversational behavior. It may contain transcription mistakes or subjective claims, so review examples and split by episode if you want to measure generalization to unseen broadcasts.</p>
+
+        <h3>Chosen and rejected answers for RM and DPO</h3>
+        <p>A viewer–host exchange supplies one observed answer. To make a preference pair, generate or write another plausible answer to the same prompt and label both against a rubric. For a factual task, prioritize correctness, then adherence to the requested format, then clarity. Blind candidate order, record why one wins, and keep unresolved ties out of a strict binary trainer. The pilot used the existing local <code>dpo.jsonl</code>. Its upstream provenance is unrecorded in this checkout.</p>
         <pre><code>{"prompt":"Convert 2.5 hours to minutes.","chosen":"150 minutes.","rejected":"125 minutes."}</code></pre>
-        <p>Store one record per JSONL line. Deduplicate exact pairs and keep every variant of a prompt in one split. For a larger corpus, group paraphrases, shared source documents, and prompt templates before assigning splits. LLM101 hashes the normalized prompt into 90/5/5 buckets. Realized counts vary with the dataset. The script accepts the flat format above and two-turn conversational pairs. It skips identical tokenized responses, overlong pairs, and unsupported conversation layouts.</p>
+        <p>The RM script accepts the flat format and compatible two-turn conversational pairs. It skips empty or token-identical answers and overlong pairs, then hashes the normalized prompt into 90/5/5 train, validation, and test buckets. For archival dialogues, group near-duplicates and source episodes before splitting to limit leakage beyond identical prompts.</p>
+      </section>
+
+      <section id="tokenizer">
+        <h2>Byte-level BPE and the .bin file</h2>
+        <p><code>train_tokenizer.py</code> reads the first 200,000 <code>text</code> rows at most. It starts from the byte alphabet and learns frequent adjacent-symbol merges up to a 6,400-token vocabulary. The saved <code>tokenizer.json</code> holds the vocabulary, merge rules and byte-level encoder/decoder configuration. It reserves <code>&lt;|endoftext|&gt;</code>, <code>&lt;|im_start|&gt;</code>, and <code>&lt;|im_end|&gt;</code>. The local tokenizer encodes <code>你好</code> as token ID <code>3193</code>, an example of a frequent byte sequence becoming one token.</p>
+      <figure class="diagram">
+        <svg viewBox="0 0 520 302" role="img" aria-labelledby="tokens-title" xmlns="http://www.w3.org/2000/svg">
+          <title id="tokens-title">The tokenizer learns rules once. The binary conversion applies those rules to the corpus and stores the resulting integer IDs.</title>
+          <defs><marker id="tokens-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 Z" class="d-arrow"/></marker></defs>
+          <rect x="34" y="10" width="452" height="50" rx="8" class="d-box"/>
+          <text x="260" y="30" text-anchor="middle" class="d-title">UTF-8 text</text>
+          <text x="260" y="48" text-anchor="middle" class="d-sub">你好 → e4 bd a0 e5 a5 bd</text>
+          <line x1="260" y1="60" x2="260" y2="82" class="d-edge" marker-end="url(#tokens-arrow)"/>
+          <rect x="34" y="83" width="452" height="50" rx="8" class="d-box"/>
+          <text x="260" y="103" text-anchor="middle" class="d-title">Apply the learned BPE merges</text>
+          <text x="260" y="121" text-anchor="middle" class="d-sub">你好 → token ID 3193 in this tokenizer</text>
+          <line x1="260" y1="133" x2="260" y2="155" class="d-edge" marker-end="url(#tokens-arrow)"/>
+          <rect x="34" y="156" width="452" height="50" rx="8" class="d-box"/>
+          <text x="260" y="176" text-anchor="middle" class="d-title">Append a document separator</text>
+          <text x="260" y="194" text-anchor="middle" class="d-sub">Token 0 marks end of document</text>
+          <line x1="260" y1="206" x2="260" y2="228" class="d-edge" marker-end="url(#tokens-arrow)"/>
+          <rect x="34" y="229" width="452" height="50" rx="8" class="d-box-accent"/>
+          <text x="260" y="249" text-anchor="middle" class="d-title">Write pretrain.bin</text>
+          <text x="260" y="267" text-anchor="middle" class="d-sub">Flat NumPy uint16 stream · 2 bytes per ID</text>
+        </svg>
+        <figcaption>The tokenizer learns rules once. The binary conversion applies those rules to the corpus and stores the resulting integer IDs.</figcaption>
+      </figure>
+        <p><code>prepare_data.py</code> encodes every pretraining row, appends the end-of-text ID and writes the IDs in chunks. The vocabulary fits in <code>uint16</code>. The local file is 632,817,122 bytes, or 316,408,561 token IDs including separators. There are no JSON records in the binary stream. NumPy <code>memmap</code> lets the trainer read random windows without loading the entire file into memory. A training window can span documents; the separator remains in the sequence.</p>
+        <p>SFT, RM and DPO use the same tokenizer but preserve JSONL boundaries so each loader can render the chat roles and identify exactly which text is a prompt, a target or a candidate.</p>
+      </section>
+
+      <section id="objectives">
+        <h2>Why the transcript goes to SFT</h2>
+        <p>Pretraining teaches the base decoder to predict the next token over a broad text stream. Here a random 512-token window is paired with the same window shifted one position forward. SFT takes the pretrained weights and changes the supervision: the viewer prompt remains visible as context, while the loss is restricted to the host's answer and its end marker.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 520 165" role="img" aria-labelledby="mask-title" xmlns="http://www.w3.org/2000/svg">
+            <title id="mask-title">Pretraining scores every next-token target in a window. SFT masks prompt and padding targets and scores the assistant response and its end marker.</title>
+            <text x="20" y="21" class="d-title">Pretraining targets</text>
+            <rect x="20" y="30" width="480" height="36" rx="7" class="d-box-accent"/>
+            <text x="260" y="52" text-anchor="middle" class="d-sub">t₁ · t₂ · t₃ · … · t₅₁₂ all contribute</text>
+            <text x="20" y="98" class="d-title">SFT targets after the one-token shift</text>
+            <rect x="20" y="107" width="180" height="39" rx="7" class="d-box"/>
+            <rect x="200" y="107" width="205" height="39" rx="7" class="d-box-accent"/>
+            <rect x="405" y="107" width="95" height="39" rx="7" class="d-box"/>
+            <g text-anchor="middle" class="d-sub">
+              <text x="110" y="131">Prompt · −100</text><text x="302" y="131">Assistant text + end marker</text><text x="453" y="131">Pad · −100</text>
+            </g>
+          </svg>
+          <figcaption>The shaded region contributes to the loss. In SFT, PyTorch cross-entropy ignores targets with label −100. The prompt still conditions the answer through causal attention.</figcaption>
+        </figure>
+        <p>Flattening a transcript into pretraining text would also train the model to predict viewer messages and archive formatting. That can be useful for domain adaptation. For this exercise, the role boundaries already give us a precise objective: given what the viewer said, learn what an assistant response looks like. SFT keeps those boundaries and avoids spending the response-training loss on the viewer turns.</p>
       </section>
 
       <section id="model">
-        <h2>Build the reward model</h2>
-        <p>Initialize the backbone from <code>sft_hcf.pt</code> and add a fresh linear head that maps one hidden vector to one scalar. Feed the same chat-formatted prompt with each candidate response and take the final real token’s hidden state. In LLM101 that token is the assistant end marker. The causal backbone and right padding let the final real token attend to the preceding prompt and response while keeping padding out of the pooled representation.</p>
-        <p>With <code>margin = r(prompt, chosen) − r(prompt, rejected)</code>, the Bradley–Terry model assigns the chosen response probability <code>sigmoid(margin)</code>. Minimize the negative log of that probability. A positive margin ranks the chosen response first, and swapping the responses reverses the margin.</p>
-        <pre><code>margin = chosen_scores.float() - rejected_scores.float()
-loss = -torch.nn.functional.logsigmoid(margin).mean()</code></pre>
-        <p>The training loop updates the backbone and head with AdamW, clips the global gradient norm, and selects the checkpoint with the lowest validation loss. The checkpoint stores the model configuration, backbone and head weights, and validation metrics. Keep the matching tokenizer and chat template alongside it when you move the checkpoint.</p>
+        <h2>Inside MiniModel</h2>
+        <p>The saved checkpoint uses a decoder-only Transformer with <strong>8 blocks</strong>, width <strong>512</strong>, <strong>8 attention heads</strong> of 64 channels each, and a <strong>512-token context</strong>. Each block uses pre-normalization and two residual connections.</p>
+      <figure class="diagram">
+        <svg viewBox="0 0 520 302" role="img" aria-labelledby="backbone-title" xmlns="http://www.w3.org/2000/svg">
+          <title id="backbone-title">MiniModel backbone. Each sublayer adds its output to its input. RoPE injects position into attention, and SwiGLU gates the feed-forward features.</title>
+          <defs><marker id="backbone-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 Z" class="d-arrow"/></marker></defs>
+          <rect x="34" y="10" width="452" height="50" rx="8" class="d-box"/>
+          <text x="260" y="30" text-anchor="middle" class="d-title">Embed token IDs</text>
+          <text x="260" y="48" text-anchor="middle" class="d-sub">[B, T] → [B, T, 512]</text>
+          <line x1="260" y1="60" x2="260" y2="82" class="d-edge" marker-end="url(#backbone-arrow)"/>
+          <rect x="34" y="83" width="452" height="50" rx="8" class="d-box"/>
+          <text x="260" y="103" text-anchor="middle" class="d-title">Residual attention sublayer</text>
+          <text x="260" y="121" text-anchor="middle" class="d-sub">RMSNorm → Q/K/V · RoPE on Q/K · causal attention</text>
+          <line x1="260" y1="133" x2="260" y2="155" class="d-edge" marker-end="url(#backbone-arrow)"/>
+          <rect x="34" y="156" width="452" height="50" rx="8" class="d-box"/>
+          <text x="260" y="176" text-anchor="middle" class="d-title">Residual feed-forward sublayer</text>
+          <text x="260" y="194" text-anchor="middle" class="d-sub">RMSNorm → SwiGLU · 512 → 1,408 → 512</text>
+          <line x1="260" y1="206" x2="260" y2="228" class="d-edge" marker-end="url(#backbone-arrow)"/>
+          <rect x="34" y="229" width="452" height="50" rx="8" class="d-box-accent"/>
+          <text x="260" y="249" text-anchor="middle" class="d-title">Repeat for 8 blocks, then final RMSNorm</text>
+          <text x="260" y="267" text-anchor="middle" class="d-sub">Contextual hidden states [B, T, 512]</text>
+        </svg>
+        <figcaption>MiniModel backbone. Each sublayer adds its output to its input. RoPE injects position into attention, and SwiGLU gates the feed-forward features.</figcaption>
+      </figure>
+        <p>Pretraining, SFT and DPO use a vocabulary head tied to the input embedding matrix. It maps each hidden state to 6,400 logits. That head supports generation and next-token likelihood. RM reuses the backbone but reads a different output: it pools the hidden state at the last real token and projects 512 channels to a single score.</p>
+
+        <h3>RM scores two answers with one shared model</h3>
+      <figure class="diagram">
+        <svg viewBox="0 0 520 302" role="img" aria-labelledby="reward-title" xmlns="http://www.w3.org/2000/svg">
+          <title id="reward-title">Pairwise reward training. Swapping the candidates flips the sign of the margin. The model learns the ordering from that difference.</title>
+          <defs><marker id="reward-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 Z" class="d-arrow"/></marker></defs>
+          <rect x="34" y="10" width="452" height="50" rx="8" class="d-box"/>
+          <text x="260" y="30" text-anchor="middle" class="d-title">Build two sequences</text>
+          <text x="260" y="48" text-anchor="middle" class="d-sub">same prompt + chosen response / rejected response</text>
+          <line x1="260" y1="60" x2="260" y2="82" class="d-edge" marker-end="url(#reward-arrow)"/>
+          <rect x="34" y="83" width="452" height="50" rx="8" class="d-box"/>
+          <text x="260" y="103" text-anchor="middle" class="d-title">Run the shared MiniModel backbone</text>
+          <text x="260" y="121" text-anchor="middle" class="d-sub">Pool each assistant-end hidden state before right padding</text>
+          <line x1="260" y1="133" x2="260" y2="155" class="d-edge" marker-end="url(#reward-arrow)"/>
+          <rect x="34" y="156" width="452" height="50" rx="8" class="d-box"/>
+          <text x="260" y="176" text-anchor="middle" class="d-title">Apply the same 512 → 1 score head</text>
+          <text x="260" y="194" text-anchor="middle" class="d-sub">r⁺ for chosen · r⁻ for rejected</text>
+          <line x1="260" y1="206" x2="260" y2="228" class="d-edge" marker-end="url(#reward-arrow)"/>
+          <rect x="34" y="229" width="452" height="50" rx="8" class="d-box-accent"/>
+          <text x="260" y="249" text-anchor="middle" class="d-title">Optimize the preference margin</text>
+          <text x="260" y="267" text-anchor="middle" class="d-sub">Δ = r⁺ − r⁻ · loss = −log σ(Δ)</text>
+        </svg>
+        <figcaption>Pairwise reward training. Swapping the candidates flips the sign of the margin. The model learns the ordering from that difference.</figcaption>
+      </figure>
+        <p>The Bradley–Terry objective models the probability of choosing the preferred answer as <code>σ(r⁺ − r⁻)</code>. A zero-initialized head gives margin 0 and loss <code>log(2) ≈ 0.693</code> before the first update. If the two scores were 1.2 and 0.4, the margin would be 0.8 and the modeled preference probability about 69%. That is an illustration; real probabilities require calibration checks.</p>
+        <p>LLM101 fine-tunes the backbone and new head with AdamW and selects the checkpoint by validation loss. Right padding never becomes the pooled token. The causal mask keeps future pad positions out of the selected representation.</p>
       </section>
 
       <section id="run">
         <h2>Run LLM101</h2>
         <p>Run these commands from the project root in a Python environment with PyTorch and <code>tokenizers</code>. The existing SFT and DPO scripts expect CUDA. The RM script also supports CPU, which is useful for a tiny smoke test. The example uses the project’s existing tokenizer and pretrained MiniModel checkpoint. To prepare your own corpus, place the SFT and preference exports in the paths below.</p>
+        <h3>Build the tokenizer and pretrain the base model</h3>
+        <p>Place the raw-text JSONL under <code>dataset/mini/</code>. The tokenizer trainer writes at the repository root, while the trainer and binary converter load from <code>out/mini/</code>. The copy below connects those paths.</p>
+        <pre><code>python scripts/train_tokenizer.py
+New-Item -ItemType Directory -Force out/mini
+Copy-Item tokenizer.json out/mini/tokenizer.json
+python scripts/prepare_data.py
+python scripts/train_pretrain.py</code></pre>
+        <h3>Convert transcripts and run post-training</h3>
+        <p>Clone the archive, point <code>SRC_DIR</code> in <code>scripts/convert_hcf_sft.py</code> to that checkout, and run <code>python scripts/convert_hcf_sft.py</code>. If you already have the trained tokenizer and <code>pretrain.pt</code>, start here. Before training DPO, export its train split to <code>dpo_train.jsonl</code>.</p>
         <pre><code>python scripts/train_sft.py --data dataset/mini/hcf_sft.jsonl --ckpt pretrain.pt --out-name sft_hcf.pt
 
 python scripts/train_rm.py --data dataset/mini/dpo.jsonl --tokenizer out/mini/tokenizer.json --init out/mini/sft_hcf.pt --output out/mini/reward.pt --epochs 1 --batch-size 8 --lr 1e-5
@@ -80,18 +251,31 @@ python scripts/train_dpo.py --data dataset/mini/dpo_train.jsonl --ckpt sft_hcf.p
           <li>Fine-tune for a few epochs from the same SFT checkpoint and compare validation loss across learning rates, keeping the split and seed fixed. For continual tuning from a saved RM, restore the full <code>reward_model</code> state into the scorer and use fresh validation data. The CLI’s <code>--init</code> takes a MiniModel checkpoint.</li>
           <li>Once you select the configuration, evaluate on held-out prompts and report sample counts and uncertainty. For reranking, evaluate the actual candidate pool and compare the top-scoring answer with a human-reviewed baseline.</li>
         </ol>
-        <p>In a seed-42 pilot, I sampled 512 rows from the local preference corpus. Filtering left 169 training pairs, 21 validation pairs, and 16 test pairs. After one epoch, the selected checkpoint got 12 of 21 validation pairs and 7 of 16 test pairs right. The run verified that training, checkpoint saving, and held-out evaluation work end to end. The sample is too small to establish ranking quality.</p>
+        <h3>What the pilot established</h3>
+        <p>I sampled 512 rows from the local preference corpus with seed 42. Filtering left 169 train pairs, 21 validation pairs, and 16 test pairs. After one epoch, the checkpoint got 12/21 validation pairs and 7/16 test pairs correct. Test loss was 0.6934, close to the equal-score baseline of 0.6931. The run verifies the pipeline and checkpoint reload. The small test set gives no convincing evidence of ranking quality.</p>
         <p>Raw rewards are relative scores. Use the score gap to compare two answers to the same prompt. Calibrate separately on held-out labels if a downstream consumer needs a reliable probability.</p>
       </section>
 
       <section id="dpo">
-        <h2>Connect RM, SFT, and DPO</h2>
-        <dl>
-          <dt><strong>SFT</strong></dt><dd>Fits a generative policy to demonstrations. LLM101 masks prompt tokens and computes next-token loss on the answer.</dd>
-          <dt><strong>Reward modeling</strong></dt><dd>Fits a standalone scorer to preferences. Its scalar output can rank candidate responses or provide a signal during RLHF.</dd>
-          <dt><strong>DPO</strong></dt><dd>Fits a generative policy directly to preference pairs. It compares chosen and rejected completion log-probability gaps against a frozen SFT reference. The DPO run has no dependency on <code>reward.pt</code>.</dd>
-        </dl>
-        <p>To compare the policies, generate answers from the SFT and DPO checkpoints on the same held-out prompts with matched sampling settings. Blind the source and measure human preference win rate, task correctness, and output length. A separately evaluated RM can help triage disagreements for review.</p>
+        <h2>How DPO uses the same preference pair</h2>
+        <p>Initialize a trainable policy π and a frozen reference π<sub>ref</sub> from <code>sft_hcf.pt</code>. The DPO loader scores the chosen and rejected responses with both models, summing shifted log probabilities over assistant tokens. This gives four log probabilities per pair.</p>
+        <pre><code>gain_chosen   = log π(chosen | prompt)   − log π_ref(chosen | prompt)
+gain_rejected = log π(rejected | prompt) − log π_ref(rejected | prompt)
+Δ_DPO         = β × (gain_chosen − gain_rejected)
+loss          = −log σ(Δ_DPO)</code></pre>
+        <p>LLM101 defaults to β = 0.1. At initialization, policy and reference coincide, so their log-probability differences are zero. Training pushes the chosen response's gain over the reference above the rejected response's gain. The runner saves a generative <code>dpo.pt</code> checkpoint. It never needs to load <code>reward.pt</code>.</p>
+        <div class="table-wrap" tabindex="0" role="region" aria-label="Comparison of training stages">
+          <table aria-label="Inputs, initialization and outputs by training stage">
+            <thead><tr><th scope="col">Stage</th><th scope="col">Input</th><th scope="col">Initialization</th><th scope="col">Output</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Pretrain</th><td>Flat token stream</td><td>Random weights</td><td>Base language model</td></tr>
+              <tr><th scope="row">SFT</th><td>Viewer → host demonstrations</td><td>Base checkpoint</td><td>Chat policy</td></tr>
+              <tr><th scope="row">RM</th><td>Chosen/rejected pairs</td><td>SFT backbone + score head</td><td>Scalar scorer</td></tr>
+              <tr><th scope="row">DPO</th><td>Chosen/rejected pairs</td><td>SFT policy + frozen SFT reference</td><td>Updated chat policy</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Evaluate the SFT and DPO policies using the same held-out prompts and sampling settings. Blind the source, measure preference and task accuracy, and track response length. Evaluate RM separately on held-out labeled pairs, then assess whether reranking improves the generated answers users actually see.</p>
       </section>
 
       <section aria-labelledby="references">
@@ -106,5 +290,6 @@ python scripts/train_dpo.py --data dataset/mini/dpo_train.jsonl --ckpt sft_hcf.p
       </section>
     </article>
   </main>
+  <footer class="site-footer"><div class="inner"><span>© 2026 Leo Jiang</span><a href="../blog.html">More writing</a></div></footer>
 </body>
 </html>
